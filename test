@@ -1,0 +1,40 @@
+import os
+from PyPDF2 import PdfMerger
+
+def gather_pdfs(directory):
+    """
+    Get a sorted list of PDF file paths in the given directory.
+    """
+    pdf_files = [f for f in os.listdir(directory) if f.lower().endswith('.pdf')]
+    pdf_files.sort()  # Ensures predictable order
+    return [os.path.join(directory, f) for f in pdf_files]
+
+def merge_pdfs(pdf_list, output_file):
+    """
+    Merges PDF files from pdf_list into a single PDF, saved as output_file.
+    """
+    merger = PdfMerger()
+    for pdf_path in pdf_list:
+        try:
+            merger.append(pdf_path)
+            print(f"Appended: {pdf_path}")
+        except Exception as e:
+            print(f"Warning: Failed to append {pdf_path}: {e}")
+    try:
+        merger.write(output_file)
+        print(f"\nMerged PDF saved as '{output_file}'.")
+    except Exception as e:
+        print(f"Failed to save output PDF: {e}")
+    finally:
+        merger.close()
+
+if __name__ == '__main__':
+    # Adjust directory as needed
+    input_dir = './pdfs'
+    result_pdf = 'merged.pdf'
+
+    pdf_files = gather_pdfs(input_dir)
+    if not pdf_files:
+        print(f"No PDF files found in directory: {input_dir}")
+    else:
+        merge_pdfs(pdf_files, result_pdf)
