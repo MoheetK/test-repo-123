@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Merger - NCF</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        #spinner { border: 4px solid rgba(0, 0, 0, 0.1); width: 24px; height: 24px; border-radius: 50%; border-left-color: #fff; animation: spin 1s ease infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .pdf-list-item { cursor: grab; transition: background-color 0.2s; }
+        .pdf-list-item:hover { background-color: #f0f4ff; }
+        .pdf-list-item.dragging { opacity: 0.5; background-color: #e0e7ff; }
+        .drag-over { border-top: 2px solid #4f46e5; }
+        .delete-btn:hover { color: #ef4444; }
+        .tab-btn.active { border-color: #4f46e5; background-color: #eef2ff; color: #4338ca; }
+        .tab-btn { transition: all 0.2s ease-in-out; }
+    </style>
+</head>
+<body class="bg-slate-100 flex items-center justify-center min-h-screen py-12">
+    <div class="bg-white w-full max-w-3xl rounded-xl shadow-lg p-8 m-4">
+
+        <div class="text-center mb-6">
+            <h1 class="text-3xl font-bold text-slate-800">PDF Merger - NCF</h1>
+            <p class="text-slate-500 mt-2">Merge PDFs from ZIP files or upload them individually.</p>
+        </div>
+
+        <div class="mb-6 border-b border-slate-200">
+            <nav class="-mb-px flex space-x-4" aria-label="Tabs">
+                <button id="tab-zip" class="tab-btn active whitespace-nowrap py-3 px-4 border-b-2 font-medium text-sm">Merge from ZIP</button>
+                <button id="tab-manual" class="tab-btn text-slate-500 hover:text-slate-700 hover:border-slate-300 whitespace-nowrap py-3 px-4 border-b-2 font-medium text-sm">Merge Individual PDFs</button>
+            </nav>
+        </div>
+
+        <div id="upload-section-zip">
+             <div class="border-2 border-dashed border-slate-300 rounded-lg p-8 text-center bg-slate-50">
+                <input type="file" id="zip-files-input" class="hidden" accept=".zip" multiple>
+                <label for="zip-files-input" class="cursor-pointer inline-block bg-indigo-600 text-white font-semibold py-3 px-6 rounded-lg shadow-md hover:bg-indigo-700">
+                    Select or Add .zip File(s)
+                </label>
+                <p id="zip-file-status" class="mt-4 text-sm text-slate-600">No ZIP files selected.</p>
+            </div>
+        </div>
+
+        <div id="upload-section-manual" class="hidden">
+             <div class="border-2 border-dashed border-slate-300 rounded-lg p-8 text-center bg-slate-50">
+                <input type="file" id="pdf-files-input" class="hidden" accept=".pdf" multiple>
+                <label for="pdf-files-input" class="cursor-pointer inline-block bg-indigo-600 text-white font-semibold py-3 px-6 rounded-lg shadow-md hover:bg-indigo-700">
+                    Select or Add PDF File(s)
+                </label>
+                <p id="pdf-file-status" class="mt-4 text-sm text-slate-600">No PDF files selected.</p>
+            </div>
+        </div>
+
+        <div id="file-list-section" class="hidden mt-8">
+            <h2 class="text-xl font-semibold text-slate-700 mb-2">Files to Merge</h2>
+            <p class="text-sm text-slate-500 mb-4">Drag to reorder, or click 'X' to remove from this list.</p>
+            <div id="pdf-list" class="border rounded-lg bg-slate-50 max-h-60 overflow-y-auto"></div>
+
+            <div class="mt-6">
+                <label for="output-filename" class="block text-sm font-medium text-slate-700 mb-1">Output Filename</label>
+                <input type="text" id="output-filename" class="w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" value="merged_document.pdf">
+            </div>
+
+            <div class="mt-6 text-center">
+                <button id="merge-button" class="w-full bg-green-500 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-green-600 flex items-center justify-center">
+                    <span id="button-text">Merge PDFs</span>
+                    <div id="spinner" class="hidden ml-3"></div>
+                </button>
+            </div>
+        </div>
+
+        <div id="status-area" class="mt-6 text-center hidden">
+            <p id="status-message" class="text-slate-700"></p>
+            <a id="download-link" class="mt-4 hidden w-full bg-blue-500 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-blue-600 inline-block">
+                Download Merged PDF
+            </a>
+            <button id="start-over-button" class="mt-4 hidden w-full bg-slate-600 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-slate-700">
+                Wanna merge again? Click to start over.
+            </button>
+        </div>
+    </div>
+
+    <div id="confirmation-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-lg">
+            <div class="p-6">
+                <h3 class="text-xl font-semibold text-slate-800">Confirm Files to Add</h3>
+                <p class="text-sm text-slate-500 mt-1">Uncheck any files you don't want to add to list</p>
+            </div>
+            <div id="modal-file-list" class="px-6 py-2 border-y max-h-80 overflow-y-auto">
+                </div>
+            <div class="p-4 bg-slate-50 rounded-b-lg flex justify-end space-x-3">
+                <button id="modal-cancel-btn" class="px-4 py-2 bg-slate-200 text-slate-800 rounded-md hover:bg-slate-300">Cancel</button>
+                <button id="modal-add-btn" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700">Add Selected Files</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Destructure PDFLib for easier access
+        const { PDFDocument } = PDFLib;
+
+        // --- DOM Element References ---
+        const DOMElements = {
+            // Tabs
+            tabZip: document.getElementById('tab-zip'),
+            tabManual: document.getElementById('tab-manual'),
+            // Upload Sections
+            uploadSectionZip: document.getElementById('upload-section-zip'),
+            uploadSectionManual: document.getElementById('upload-section-manual'),
+            zipFilesInput: document.getElementById('zip-files-input'),
+            pdfFilesInput: document.getElementById('pdf-files-input'),
+            zipFileStatus: document.getElementById('zip-file-status'), // Renamed for clarity
+            pdfFileStatus: document.getElementById('pdf-file-status'), // Renamed for clarity
+            // File List
+            fileListSection: document.getElementById('file-list-section'),
+            pdfListContainer: document.getElementById('pdf-list'),
+            outputFilenameInput: document.getElementById('output-filename'),
+            mergeButton: document.getElementById('merge-button'),
+            buttonText: document.getElementById('button-text'),
+            spinner: document.getElementById('spinner'),
+            // Status Area
+            statusArea: document.getElementById('status-area'),
+            statusMessage: document.getElementById('status-message'),
+            downloadLink: document.getElementById('download-link'),
+            startOverButton: document.getElementById('start-over-button'),
+            // Confirmation Modal
+            confirmationModal: document.getElementById('confirmation-modal'),
+            modalFileList: document.getElementById('modal-file-list'),
+            modalAddBtn: document.getElementById('modal-add-btn'),
+            modalCancelBtn: document.getElementById('modal-cancel-btn'),
+        };
+
+        // --- Global State ---
+        // Stores PDF file objects ready for merging, including their name and a function to get content.
+        let pdfSources = [];
+        // Temporarily stores PDFs extracted from ZIPs or individual uploads for confirmation.
+        let pendingPdfSources = [];
+        // Used for drag-and-drop reordering.
+        let draggedListItem = null;
+
+        // --- Utility Functions ---
+
+        /**
+         * Updates the UI to reflect the current status of an operation.
+         * @param {string} message - The message to display.
+         * @param {'success' | 'error' | 'info'} type - The type of status (determines styling).
+         */
+        function updateStatusMessage(message, type) {
+            DOMElements.statusMessage.textContent = message;
+            DOMElements.statusMessage.className = 'font-medium'; // Reset classes
+            switch (type) {
+                case 'success':
+                    DOMElements.statusMessage.classList.add('text-green-600');
+                    break;
+                case 'error':
+                    DOMElements.statusMessage.classList.add('text-red-600');
+                    break;
+                default: // 'info' or any other
+                    DOMElements.statusMessage.classList.add('text-slate-700');
+                    break;
+            }
+            DOMElements.statusArea.classList.remove('hidden');
+        }
+
+        /**
+         * Sets the loading state of the merge button and spinner.
+         * @param {boolean} isLoading - True to show spinner and disable button, false otherwise.
+         */
+        function setLoadingState(isLoading) {
+            DOMElements.mergeButton.disabled = isLoading;
+            DOMElements.spinner.classList.toggle('hidden', !isLoading);
+            DOMElements.buttonText.classList.toggle('hidden', isLoading);
+        }
+
+        /**
+         * Resets the entire tool to its initial state.
+         */
+        function resetTool() {
+            pdfSources = [];
+            pendingPdfSources = [];
+            DOMElements.pdfListContainer.innerHTML = '';
+            DOMElements.fileListSection.classList.add('hidden');
+            DOMElements.outputFilenameInput.value = 'merged_document.pdf';
+            DOMElements.statusArea.classList.add('hidden');
+            DOMElements.downloadLink.classList.add('hidden');
+            DOMElements.startOverButton.classList.add('hidden');
+            DOMElements.zipFilesInput.value = ''; // Clear file input
+            DOMElements.pdfFilesInput.value = ''; // Clear file input
+            DOMElements.zipFileStatus.textContent = 'No ZIP files selected.';
+            DOMElements.pdfFileStatus.textContent = 'No PDF files selected.';
+            updateStatusMessage('Ready to merge PDFs.', 'info'); // Initial status message
+            switchTab('zip'); // Go back to default tab
+        }
+
+        /**
+         * Switches between the ZIP upload tab and the Manual PDF upload tab.
+         * @param {'zip' | 'manual'} mode - The tab to activate.
+         */
+        function switchTab(mode) {
+            resetFileListAndInputs(); // Clear current files when switching tabs
+            if (mode === 'zip') {
+                DOMElements.tabZip.classList.add('active');
+                DOMElements.tabManual.classList.remove('active');
+                DOMElements.uploadSectionZip.classList.remove('hidden');
+                DOMElements.uploadSectionManual.classList.add('hidden');
+            } else {
+                DOMElements.tabManual.classList.add('active');
+                DOMElements.tabZip.classList.remove('active');
+                DOMElements.uploadSectionManual.classList.remove('hidden');
+                DOMElements.uploadSectionZip.classList.add('hidden');
+            }
+        }
+
+        /**
+         * Clears the current list of PDFs and resets file input displays.
+         * Used when switching tabs to avoid mixing file types.
+         */
+        function resetFileListAndInputs() {
+            pdfSources = [];
+            pendingPdfSources = [];
+            DOMElements.pdfListContainer.innerHTML = '';
+            DOMElements.fileListSection.classList.add('hidden');
+            DOMElements.zipFilesInput.value = '';
+            DOMElements.pdfFilesInput.value = '';
+            DOMElements.zipFileStatus.textContent = 'No ZIP files selected.';
+            DOMElements.pdfFileStatus.textContent = 'No PDF files selected.';
+            DOMElements.statusArea.classList.add('hidden');
+        }
+
+        /**
+         * Renders the current list of PDF files for merging in the UI.
+         * Includes drag-and-drop functionality and delete buttons.
+         */
+        function renderPdfList() {
+            DOMElements.pdfListContainer.innerHTML = '';
+            if (pdfSources.length === 0) {
+                DOMElements.fileListSection.classList.add('hidden');
+                return;
+            }
+
+            pdfSources.forEach((source, index) => {
+                const listItem = document.createElement('div');
+                listItem.className = 'pdf-list-item p-3 border-b border-slate-200 text-slate-700 text-sm flex items-center justify-between';
+                listItem.setAttribute('draggable', true);
+                listItem.dataset.index = index; // Store index for drag-and-drop
+
+                const nameContainer = document.createElement('div');
+                nameContainer.className = 'flex items-center overflow-hidden mr-2';
+                const handle = document.createElement('span');
+                handle.innerHTML = '&#x2630;'; // Hamburger icon for drag handle
+                handle.className = 'mr-3 text-slate-400 cursor-grab';
+                const textNode = document.createElement('span');
+                textNode.textContent = source.name;
+                textNode.className = 'truncate';
+
+                nameContainer.appendChild(handle);
+                nameContainer.appendChild(textNode);
+
+                const deleteBtn = document.createElement('button');
+                deleteBtn.innerHTML = '&times;'; // 'X' icon
+                deleteBtn.className = 'delete-btn text-xl font-bold text-slate-500 px-2 flex-shrink-0';
+                deleteBtn.onclick = () => removePdfFromList(index);
+
+                listItem.appendChild(nameContainer);
+                listItem.appendChild(deleteBtn);
+                DOMElements.pdfListContainer.appendChild(listItem);
+
+                // --- Drag and Drop Event Listeners ---
+                listItem.addEventListener('dragstart', (e) => {
+                    draggedListItem = listItem;
+                    setTimeout(() => listItem.classList.add('dragging'), 0);
+                    e.dataTransfer.effectAllowed = 'move';
+                });
+
+                listItem.addEventListener('dragend', () => {
+                    draggedListItem.classList.remove('dragging');
+                    draggedListItem = null;
+                    document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+                });
+
+                listItem.addEventListener('dragover', (e) => {
+                    e.preventDefault(); // Necessary to allow drop
+                    if (e.target.closest('.pdf-list-item') === listItem) { // Apply drag-over only to the current target
+                        listItem.classList.add('drag-over');
+                    }
+                });
+
+                listItem.addEventListener('dragleave', () => {
+                    listItem.classList.remove('drag-over');
+                });
+
+                listItem.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    listItem.classList.remove('drag-over'); // Remove drag-over style immediately
+                    if (!draggedListItem || draggedListItem === listItem) {
+                        return;
+                    }
+
+                    const fromIndex = parseInt(draggedListItem.dataset.index, 10);
+                    const toIndex = parseInt(listItem.dataset.index, 10);
+
+                    if (fromIndex !== toIndex) {
+                        const [movedItem] = pdfSources.splice(fromIndex, 1);
+                        pdfSources.splice(toIndex, 0, movedItem);
+                        renderPdfList(); // Re-render to update order and dataset indices
+                    }
+                });
+            });
+
+            // Update file count display
+            DOMElements.zipFileStatus.textContent = `Total files in list: ${pdfSources.length}.`;
+            DOMElements.pdfFileStatus.textContent = `Total files in list: ${pdfSources.length}.`;
+            DOMElements.fileListSection.classList.remove('hidden'); // Show the list section
+        }
+
+        /**
+         * Removes a PDF file from the list of files to be merged.
+         * @param {number} index - The index of the file to remove.
+         */
+        function removePdfFromList(index) {
+            pdfSources.splice(index, 1);
+            renderPdfList(); // Re-render the list after removal
+        }
+
+        // --- Event Handlers ---
+
+        /**
+         * Handles the selection of ZIP files. Extracts PDFs and prompts for confirmation.
+         * @param {Event} event - The file input change event.
+         */
+        async function handleZipFileSelect(event) {
+            const files = event.target.files;
+            if (files.length === 0) {
+                DOMElements.zipFileStatus.textContent = 'No ZIP files selected.';
+                return;
+            }
+
+            DOMElements.statusArea.classList.add('hidden');
+            pendingPdfSources = []; // Clear previous pending files
+            const existingKeys = new Set(pdfSources.map(s => s.key));
+            let totalPdfsFound = 0;
+
+            DOMElements.zipFileStatus.textContent = `Processing ${files.length} ZIP file(s)...`;
+
+            try {
+                for (const file of files) {
+                    const zip = new JSZip();
+                    await zip.loadAsync(file);
+
+                    zip.forEach((relativePath, zipEntry) => {
+                        if (!zipEntry.dir && relativePath.toLowerCase().endsWith('.pdf')) {
+                            // Create a unique key for each PDF to prevent duplicates
+                            const key = `zip:${file.name}/${zipEntry.name}`;
+                            if (!existingKeys.has(key)) {
+                                pendingPdfSources.push({
+                                    key: key,
+                                    name: zipEntry.name,
+                                    // getContent is a function that returns a Promise resolving to Uint8Array
+                                    getContent: () => zipEntry.async('uint8array')
+                                });
+                                totalPdfsFound++;
+                            }
+                        }
+                    });
+                }
+
+                if (totalPdfsFound > 0) {
+                    DOMElements.zipFileStatus.textContent = `Found ${totalPdfsFound} new PDF(s) in ZIP files. Please confirm.`;
+                    showConfirmationModal();
+                } else {
+                    DOMElements.zipFileStatus.textContent = pdfSources.length > 0
+                        ? `No new PDFs found in ZIP files. Total files in list: ${pdfSources.length}.`
+                        : `No PDF files found in the selected ZIP file(s).`;
+                }
+
+            } catch (error) {
+                console.error("Error processing ZIP file(s):", error);
+                updateStatusMessage(`Failed to process ZIP file(s): ${error.message}`, 'error');
+                DOMEElements.zipFileStatus.textContent = 'Error processing ZIP files.';
+            } finally {
+                even
